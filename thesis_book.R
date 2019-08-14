@@ -17,26 +17,20 @@ levels(ae$type)
 
 ae<- ae %>% 
   filter(type != 9) #remove unused rows
+
+ae <- ae %>% 
+  filter(type != 4) #remove suggestions ()
+
+ae_copy <- ae 
+
 ae <- ae %>% 
   filter(type != 0) #remove filtered out rows
-ae <- ae %>% 
-  filter(type != 4) #remove suggestions
 
 
-colnames(twcs)
-glimpse(twcs)
 
-inbounds <- twcs %>% 
-  filter(inbound == 'True')
 
-colnames(inbounds)
-glimpse(inbounds)
-
-first_inbounds <- inbounds %>% 
-  filter(is.na(in_response_to_tweet_id))
 
 # start using TM
-newdata <- first_inbounds$text
 newdata <- ae$text_x
 mydata <- VCorpus(VectorSource(newdata))
 
@@ -101,7 +95,7 @@ dtm_df$type <- factor(dtm_df$type)
 
 table(dtm_df$type)
 
-tdm_df$type
+dtm_df$type
 library(plyr)
 
 dtm_df$type <- revalue(dtm_df$type,
@@ -112,8 +106,10 @@ dtm_df$type <- revalue(dtm_df$type,
 
 dtm_dm$type <- dtm_df$type
 
+## GRAPHICS
+
 # word counts and such
-freq <- sort(colSums(as.matrix(dtm_df[,1:498])), decreasing=TRUE)   
+freq <- sort(colSums(as.matrix(dtm_df[,1:524])), decreasing=TRUE)   
 head(freq, 100)
 wf <- data.frame(word=names(freq), freq = freq)
 head(wf)
@@ -187,33 +183,16 @@ library(gridExtra)
 
 grid.arrange(plot_complaint, plot_question, plot_request, plot_compliment)
 ggsave('classfreqs.png', height = 4, width = 6)
-library(RColorBrewer)
-library(wordcloud)
-# wordcloud
-?element_text
-set.seed(10)
-wordcloud(names(freq), freq, min.freq=30, max.words = 10)
 
 # actual analysis maybe
 library(dplyr)
 library(caret)
 
-# data partitions
-#set.seed(1996)
-#index_train <- createDataPartition(train$helpful, p = 0.7, list = F)
-#ctrain <- train[index.train, ]
-#ctest <- train[-index.train, ]
-
-# To-do: replace this with caret variant
-s <- sample(1:nrow(tdm_df), nrow(tdm_df)*(0.70), replace = FALSE) # random sampling
-
-train <- tdm_df[s,] # training set
-
-test <- tdm_df[-s,] # testing set
 
 # set first seed
 set.seed(1996)
 
+# partition
 train_index <- createDataPartition(dtm_df$type,
                                    p = 0.7, 
                                    list = FALSE)
@@ -228,73 +207,148 @@ ctrl <- trainControl(method = "repeatedcv", repeats = 5,
                      summaryFunction = multiClassSummary,
                      verboseIter = TRUE)
 
-
+glimpse(test)
+levels(test$type)
+glimpse(train)
+levels(train$type)
 
 set.seed(10)
-svm.tfidf <- train(train[,c(1:498)], train[,499],
+svm.tfidf <- train(train[,c(1:499)], train[,500],
                   method = "svmLinear3", 
                   trControl = ctrl,
                   tuneLength = 10,
                   metric = 'mlogLoss') # train svm
 
 set.seed(10)
-knn.tfidf <- train(train[,c(1:498)], train[,499],
+knn.tfidf <- train(train[,c(1:499)], train[,500],
                    method = "kknn", 
                    trControl = ctrl,
                    tuneLength = 20,
                    metric = 'mlogLoss') # train knn
 
 set.seed(10)
-sda.tfidf <- train(train[,c(1:498)], train[,499],
+sda.tfidf <- train(train[,c(1:499)], train[,500],
                    method = "lda", 
                    trControl = ctrl,
                    tuneLength = 10,
                    metric = 'mlogLoss') # train pda
 
 set.seed(10)
-xgb.tfidf <- train(train[,c(1:498)], train[,499],
+xgb.tfidf <- train(train[,c(1:499)], train[,500],
                    method = "xgbTree", 
                    trControl = ctrl,
-                   tuneLength = 10,
                    metric = 'mlogLoss') # train xgb
 
-rf.tfidf
+
 svm.tfidf
 knn.tfidf
 sda.tfidf
 xgb.tfidf
-nb.tfidf
 
-?make.names
 # predictions
-
-
 svm.preds <- predict(svm.tfidf, newdata = test)
 knn.preds <- predict(knn.tfidf, newdata = test)
 sda.preds <- predict(sda.tfidf, newdata = test)
 xgb.preds <- predict(xgb.tfidf, newdata = test)
 
-table(test$type, xgb.preds)
 
-source('calc_confusion.R')
 confusionMatrix(xgb.preds, test$type, mode = 'everything')
 confusionMatrix(knn.preds, test$type, mode = 'everything')
 confusionMatrix(svm.preds, test$type, mode = 'everything')
 confusionMatrix(sda.preds, test$type, mode = 'everything')
 
-preds
+### INCLUDE SENTIMENT ANALYSIS
 
-table(test$type, svm.preds)
-confusionMatrix(pda.preds)
-?confusionMatrix
-table(test$preds)
+library('sentimentr')
 
-tdm_df <- cbind(tdm_df, ae$type)
-glimpse(test)
+example_sentiment <- sentiment_by(ae$text_x, by = NULL) # extract average sentiment by tweet
 
-tdm_dm[1:10, ]
+dtm_df_sentiment <- dtm_df # copy dtm into new matrix
 
-ggplot(tdm_dm)
+dtm_df_sentiment$sentiment <- example_sentiment$ave_sentiment # add avg sentiment
 
-write_csv(test, path = 'testresults.csv')
+# RUN ANALYSIS AGAIN
+
+# set first seed
+set.seed(1996)
+
+# partition
+strain_index <- createDataPartition(dtm_df_sentiment$type,
+                                   p = 0.7, 
+                                   list = FALSE)
+strain <- dtm_df_sentiment[strain_index, ]
+stest <- dtm_df_sentiment[-strain_index, ]
+
+table(strain$type)# class instances in train data
+table(stest$type)
+
+
+glimpse(stest)
+levels(stest$type)
+glimpse(strain)
+levels(strain$type)
+
+# workaround to rearrange dependent variable as last column
+strain$type2 <- strain$type
+strain$type <- NULL
+
+stest$type2 <- stest$type
+stest$type <- NULL
+
+glimpse(strain)
+glimpse(stest)
+
+set.seed(10)
+svm.tfidf.s <- train(strain[,c(1:499)], strain[,500],
+                   method = "svmLinear3", 
+                   trControl = ctrl,
+                   tuneLength = 10,
+                   metric = 'mlogLoss') # train svm
+
+set.seed(10)
+knn.tfidf.s <- train(strain[,c(1:499)], strain[,500],
+                   method = "kknn", 
+                   trControl = ctrl,
+                   tuneLength = 20,
+                   metric = 'mlogLoss') # train knn
+
+set.seed(10)
+sda.tfidf.s <- train(strain[,c(1:499)], strain[,500],
+                   method = "lda", 
+                   trControl = ctrl,
+                   tuneLength = 10,
+                   metric = 'mlogLoss') # train pda
+
+set.seed(10)
+xgb.tfidf.s <- train(strain[,c(1:499)], strain[,500],
+                   method = "xgbTree", 
+                   trControl = ctrl,
+                   metric = 'mlogLoss') # train xgb
+
+
+svm.tfidf
+knn.tfidf
+sda.tfidf
+xgb.tfidf
+
+# predictions
+
+
+svm.preds.s <- predict(svm.tfidf, newdata = stest)
+knn.preds.s <- predict(knn.tfidf, newdata = stest)
+sda.preds.s <- predict(sda.tfidf, newdata = stest)
+xgb.preds.s <- predict(xgb.tfidf, newdata = stest)
+
+table(test$type, xgb.preds)
+
+confusionMatrix(xgb.preds, test$type, mode = 'everything')
+confusionMatrix(knn.preds, test$type, mode = 'everything')
+confusionMatrix(svm.preds, test$type, mode = 'everything')
+confusionMatrix(sda.preds, test$type, mode = 'everything')
+
+confusionMatrix(xgb.preds.s, stest$type, mode = 'everything')
+confusionMatrix(knn.preds.s, stest$type, mode = 'everything')
+confusionMatrix(svm.preds.s, stest$type, mode = 'everything')
+confusionMatrix(sda.preds.s, stest$type, mode = 'everything')
+
 
